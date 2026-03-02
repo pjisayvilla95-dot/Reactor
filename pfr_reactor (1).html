@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PFR — Plug Flow Reactor Simulator</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+:root {
+  --bg:#070d1a; --panel:#0d1628; --border:#1a2f52;
+  --accent:#00d4ff; --reactant:#ff6b35; --product:#00e5a0;
+  --water:#00aaff; --text:#c8ddf5; --dim:#4a6080;
+  --purple:#b060ff; --yellow:#ffd060;
+}
+html, body { height:100%; }
+body { background:var(--bg); color:var(--text); font-family:'Share Tech Mono',monospace; display:flex; flex-direction:column; overflow-x:hidden; }
+body::before { content:''; position:fixed; inset:0; background-image:linear-gradient(rgba(0,180,255,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,180,255,0.03) 1px,transparent 1px); background-size:40px 40px; pointer-events:none; z-index:0; }
+
+/* ── HEADER ── */
+header { position:relative; z-index:10; padding:13px 24px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; background:rgba(7,13,26,0.97); backdrop-filter:blur(10px); flex-shrink:0; }
+.logo { font-family:'Orbitron',monospace; font-weight:900; font-size:0.95rem; letter-spacing:0.15em; color:var(--accent); text-shadow:0 0 20px rgba(0,212,255,0.5); }
+.logo span { color:var(--reactant); }
+.badge { font-size:0.58rem; padding:3px 9px; border:1px solid var(--accent); color:var(--accent); letter-spacing:0.18em; opacity:0.7; }
+#systemStatus { display:flex; align-items:center; gap:8px; font-size:0.6rem; letter-spacing:0.1em; }
+.status-dot { width:8px; height:8px; border-radius:50%; background:var(--product); box-shadow:0 0 8px var(--product); transition:all 0.3s; }
+.status-dot.warn    { background:#ffb400; box-shadow:0 0 8px  #ffb400; animation:blink 1s    infinite; }
+.status-dot.danger  { background:#ff4020; box-shadow:0 0 10px #ff4020; animation:blink 0.5s  infinite; }
+.status-dot.critical{ background:#ff0030; box-shadow:0 0 14px #ff0030; animation:blink 0.25s infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+/* ── PAGE LAYOUT ── */
+.page-wrap { position:relative; z-index:1; flex:1; display:flex; flex-direction:column; overflow-y:auto; }
+
+/* ── TOP ROW: panel + reactor ── */
+.top-row { display:grid; grid-template-columns:300px 1fr; min-height:680px; border-bottom:2px solid var(--border); }
+
+/* LEFT PANEL */
+.left-panel { padding:10px 14px 10px 14px; display:flex; flex-direction:column; gap:0; border-right:1px solid var(--border); overflow-y:auto; max-height:680px; }
+.left-panel::-webkit-scrollbar { width:4px; }
+.left-panel::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+
+/* REACTOR AREA */
+.reactor-area { display:flex; align-items:center; justify-content:center; padding:20px; }
+canvas#reactor { display:block; filter:drop-shadow(0 0 30px rgba(0,180,255,0.18)); }
+
+/* ── COLLAPSIBLE SECTIONS ── */
+.section { border-bottom:1px solid var(--border); }
+.section:last-child { border-bottom:none; }
+.section-header { display:flex; align-items:center; padding:9px 0; cursor:pointer; user-select:none; font-family:'Orbitron',monospace; font-size:0.6rem; letter-spacing:0.18em; color:var(--accent); text-transform:uppercase; transition:color 0.2s; gap:6px; }
+.section-header:hover { color:#60eaff; }
+.section-header .s-title { flex:1; }
+.s-arrow { font-size:0.6rem; transition:transform 0.25s ease; color:var(--dim); flex-shrink:0; }
+.s-badge { font-size:0.49rem; padding:1px 6px; border:1px solid var(--dim); color:var(--dim); letter-spacing:0.08em; font-family:'Share Tech Mono',monospace; white-space:nowrap; }
+.s-badge.alarm-active  { border-color:#ffb400; color:#ffb400; }
+.s-badge.alarm-danger  { border-color:#ff4020; color:#ff4020; }
+.s-badge.alarm-critical{ border-color:#ff0030; color:#ff0030; animation:blink 0.4s infinite; }
+.section-body { overflow:hidden; max-height:2000px; transition:max-height 0.35s ease, opacity 0.25s ease, padding 0.25s ease; opacity:1; padding-bottom:10px; }
+.section-body.collapsed { max-height:0; opacity:0; padding-bottom:0; }
+.section.collapsed .s-arrow { transform:rotate(-90deg); }
+
+/* ── METRICS ── */
+.metrics { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.metric { background:var(--panel); border:1px solid var(--border); padding:8px; position:relative; overflow:hidden; }
+.metric::before { content:''; position:absolute; top:0;left:0; width:3px;height:100%; background:var(--accent); }
+.metric.hot::before  { background:var(--reactant); }
+.metric.out::before  { background:var(--product); }
+.metric.cool::before { background:var(--water); }
+.metric.purp::before { background:var(--purple); }
+.metric.yell::before { background:var(--yellow); }
+.metric-label { font-size:0.5rem; color:var(--dim); letter-spacing:0.07em; text-transform:uppercase; margin-bottom:2px; }
+.metric-value { font-family:'Orbitron',monospace; font-size:0.95rem; font-weight:600; color:var(--text); line-height:1.2; }
+.metric-unit  { font-size:0.48rem; color:var(--dim); margin-left:1px; }
+
+/* ── CONTROLS ── */
+.controls { display:flex; flex-direction:column; gap:8px; }
+.ctrl-group { display:flex; flex-direction:column; gap:4px; }
+.ctrl-label { display:flex; justify-content:space-between; font-size:0.58rem; color:var(--dim); letter-spacing:0.03em; }
+.ctrl-label span { color:var(--accent); font-family:'Orbitron',monospace; font-size:0.58rem; }
+.ctrl-section { font-size:0.52rem; color:var(--purple); letter-spacing:0.1em; opacity:0.85; border-top:1px solid rgba(176,96,255,0.18); padding-top:6px; margin-top:2px; }
+input[type=range] { -webkit-appearance:none; width:100%; height:3px; background:var(--border); outline:none; border-radius:2px; }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:12px;height:12px; border-radius:50%; background:var(--accent); cursor:pointer; box-shadow:0 0 7px var(--accent); }
+
+/* ── BUTTONS ── */
+.btn-row { display:flex; gap:7px; }
+.btn { flex:1; padding:8px 4px; border:1px solid var(--border); background:transparent; color:var(--text); font-family:'Share Tech Mono',monospace; font-size:0.63rem; letter-spacing:0.07em; cursor:pointer; text-transform:uppercase; transition:all 0.18s; }
+.btn:hover,.btn.active { background:var(--accent); color:var(--bg); border-color:var(--accent); box-shadow:0 0 12px rgba(0,212,255,0.35); }
+.btn.play { border-color:var(--product); color:var(--product); }
+.btn.play:hover,.btn.play.active { background:var(--product); color:var(--bg); box-shadow:0 0 12px rgba(0,229,160,0.35); }
+.mode-btns { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+
+/* ── ALARM LOG ── */
+.alarm-log-wrap { background:var(--panel); border:1px solid var(--border); }
+.alarm-log-entries { padding:6px 8px; max-height:140px; overflow-y:auto; }
+.alarm-log-entries::-webkit-scrollbar { width:3px; }
+.alarm-log-entries::-webkit-scrollbar-thumb { background:var(--border); }
+.log-entry { display:flex; gap:6px; align-items:flex-start; font-size:0.55rem; padding:3px 0; border-bottom:1px solid rgba(26,47,82,0.5); line-height:1.4; }
+.log-entry:last-child { border-bottom:none; }
+.log-time { color:var(--dim); flex-shrink:0; font-size:0.5rem; padding-top:1px; }
+.log-msg { flex:1; }
+.log-msg.w  { color:#ffb400; }
+.log-msg.d  { color:#ff4020; }
+.log-msg.c  { color:#ff0030; }
+.log-msg.ok { color:var(--product); }
+
+/* ── LEGEND ── */
+.legend { display:flex; flex-direction:column; gap:5px; }
+.legend-item { display:flex; align-items:center; gap:6px; font-size:0.57rem; color:var(--dim); }
+.legend-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+
+/* ── BOTTOM CHARTS SECTION ── */
+.charts-section { padding:16px; }
+.charts-header { font-family:'Orbitron',monospace; font-size:0.65rem; letter-spacing:0.22em; color:var(--accent); text-transform:uppercase; margin-bottom:14px; padding-bottom:8px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px; }
+.charts-header::after { content:''; flex:1; height:1px; background:linear-gradient(to right, var(--border), transparent); }
+
+.charts-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; }
+
+/* Chart card */
+.chart-card { background:var(--panel); border:1px solid var(--border); padding:10px; transition:border-color 0.2s; }
+.chart-card:hover { border-color:rgba(0,212,255,0.3); }
+.chart-header { display:flex; align-items:center; gap:8px; margin-bottom:8px; cursor:pointer; user-select:none; }
+.chart-header:hover .chart-title-text { color:#aaccee; }
+.chart-title-text { font-size:0.58rem; color:var(--dim); letter-spacing:0.08em; text-transform:uppercase; transition:color 0.15s; flex:1; }
+.chart-badge { font-size:0.52rem; padding:2px 6px; border:1px solid; font-family:'Orbitron',monospace; white-space:nowrap; }
+.cb-blue   { border-color:var(--accent);   color:var(--accent); }
+.cb-orange { border-color:var(--reactant); color:var(--reactant); }
+.cb-green  { border-color:var(--product);  color:var(--product); }
+.cb-purple { border-color:var(--purple);   color:var(--purple); }
+.cb-yellow { border-color:var(--yellow);   color:var(--yellow); }
+.cb-red    { border-color:#ff4020;         color:#ff4020; }
+.chart-toggle-arrow { font-size:0.6rem; color:var(--dim); transition:transform 0.22s; flex-shrink:0; }
+.chart-body { overflow:hidden; transition:max-height 0.3s ease, opacity 0.22s ease; opacity:1; }
+.chart-body.collapsed { max-height:0 !important; opacity:0; }
+.chart-card.collapsed .chart-toggle-arrow { transform:rotate(-90deg); }
+/* Chart canvas — crisp rendering */
+.chart-canvas { display:block; width:100%; image-rendering:crisp-edges; }
+
+/* ── METRIC ALARM STATES ── */
+.metric.alarm-warn   { border-color:#ffb40055!important; }
+.metric.alarm-warn::before { background:#ffb400!important; }
+.metric.alarm-warn   .metric-value { color:#ffb400; }
+.metric.alarm-danger { border-color:#ff402055!important; }
+.metric.alarm-danger::before { background:#ff4020!important; }
+.metric.alarm-danger .metric-value { color:#ff4020; animation:blink 0.6s infinite; }
+.metric.alarm-critical { border-color:#ff003055!important; }
+.metric.alarm-critical::before { background:#ff0030!important; }
+.metric.alarm-critical .metric-value { color:#ff0030; animation:blink 0.3s infinite; }
+
+/* ── ALARM BANNERS ── */
+#criticalFlash { position:fixed;inset:0;background:rgba(255,30,30,0.07);pointer-events:none;z-index:9990;opacity:0;display:none; }
+@keyframes screenFlash { 0%,100%{opacity:0} 50%{opacity:1} }
+#criticalFlash.flashing { display:block; animation:screenFlash 0.6s ease-in-out infinite; }
+#alarmOverlay { position:fixed; top:52px; left:0; right:0; z-index:9999; pointer-events:none; }
+.alarm-banner { display:flex; align-items:center; gap:9px; padding:8px 16px; font-family:'Orbitron',monospace; font-size:0.62rem; letter-spacing:0.09em; border-bottom:1px solid; pointer-events:all; animation:slideDown 0.3s ease; }
+@keyframes slideDown { from{transform:translateY(-100%);opacity:0} to{transform:translateY(0);opacity:1} }
+.alarm-banner.warning  { background:rgba(255,180,0,0.12);  border-color:rgba(255,180,0,0.5);  color:#ffb400; }
+.alarm-banner.danger   { background:rgba(255,60,0,0.15);   border-color:rgba(255,60,0,0.6);   color:#ff4020; }
+.alarm-banner.critical { background:rgba(255,0,0,0.2);     border-color:rgba(255,0,50,0.8);   color:#ff1040; animation:slideDown 0.3s ease, pulseBorder 0.5s ease-in-out infinite alternate; }
+@keyframes pulseBorder { from{box-shadow:none} to{box-shadow:0 2px 18px rgba(255,0,50,0.35)} }
+.alarm-icon  { font-size:0.9rem; flex-shrink:0; }
+.alarm-text  { flex:1; line-height:1.3; }
+.alarm-title { font-weight:700; font-size:0.65rem; }
+.alarm-desc  { font-size:0.54rem; opacity:0.75; font-family:'Share Tech Mono',monospace; margin-top:1px; }
+
+footer { position:relative;z-index:1;text-align:center;padding:8px;font-size:0.53rem;color:var(--dim);letter-spacing:0.12em;border-top:1px solid var(--border);flex-shrink:0; }
+</style>
+</head>
+<body>
+
+<div id="criticalFlash"></div>
+<div id="alarmOverlay"></div>
+
+<header>
+  <div class="logo">PFR<span>//</span>SIM <span style="font-size:0.6rem;font-weight:400;color:var(--dim);margin-left:10px;">PLUG FLOW REACTOR</span></div>
+  <div id="systemStatus">
+    <div class="status-dot" id="statusDot"></div>
+    <span id="statusText" style="color:var(--product)">SISTEMA NOMINAL</span>
+  </div>
+  <div class="badge">SIMULADOR v3.0</div>
+</header>
+
+<div class="page-wrap">
+
+  <!-- ══════════ TOP ROW ══════════ -->
+  <div class="top-row">
+
+    <!-- LEFT PANEL -->
+    <div class="left-panel">
+
+      <div class="section" id="sec-metrics">
+        <div class="section-header" onclick="toggleSection('sec-metrics')">
+          <span class="s-title">▸ Métricas Tiempo Real</span>
+          <span class="s-arrow">▾</span>
+        </div>
+        <div class="section-body">
+          <div class="metrics">
+            <div class="metric hot"><div class="metric-label">Conversión X</div><div class="metric-value" id="mConv">—<span class="metric-unit">%</span></div></div>
+            <div class="metric">   <div class="metric-label">T° Reactor</div><div class="metric-value" id="mTemp">—<span class="metric-unit">°C</span></div></div>
+            <div class="metric cool"><div class="metric-label">T° Refrig.</div><div class="metric-value" id="mCool">25<span class="metric-unit">°C</span></div></div>
+            <div class="metric out"><div class="metric-label">F salida</div><div class="metric-value" id="mFlow">—<span class="metric-unit">m³/s</span></div></div>
+            <div class="metric purp"><div class="metric-label">C salida</div><div class="metric-value" id="mCout">—<span class="metric-unit">mol/L</span></div></div>
+            <div class="metric yell"><div class="metric-label">Calor lib.</div><div class="metric-value" id="mHeat">—<span class="metric-unit">kW</span></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section" id="sec-flow">
+        <div class="section-header" onclick="toggleSection('sec-flow')">
+          <span class="s-title">▸ Condiciones de Flujo</span>
+          <span class="s-arrow">▾</span>
+        </div>
+        <div class="section-body">
+          <div class="controls">
+            <div class="ctrl-group">
+              <div class="ctrl-label">Flujo Volumétrico F₀ <span id="lFlow">0.5</span> m³/s</div>
+              <input type="range" id="sFlow" min="0.1" max="2.0" value="0.5" step="0.1">
+            </div>
+            <div class="ctrl-group">
+              <div class="ctrl-label">Volumen Reactor V <span id="lVol">2.0</span> m³</div>
+              <input type="range" id="sVol" min="0.5" max="10" value="2" step="0.5">
+            </div>
+            <div class="ctrl-group">
+              <div class="ctrl-label">Conc. Inicial C₀ <span id="lC0">2.0</span> mol/L</div>
+              <input type="range" id="sC0" min="0.5" max="8" value="2" step="0.5">
+            </div>
+            <div class="ctrl-group">
+              <div class="ctrl-label">Presión Operación P <span id="lPres">5.0</span> bar</div>
+              <input type="range" id="sPres" min="1" max="20" value="5" step="0.5">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section" id="sec-kinetics">
+        <div class="section-header" onclick="toggleSection('sec-kinetics')">
+          <span class="s-title">▸ Parámetros Cinéticos</span>
+          <span class="s-arrow">▾</span>
+        </div>
+        <div class="section-body">
+          <div class="controls">
+            <div class="ctrl-group">
+              <div class="ctrl-label">Energía Activación Ea <span id="lEa">75</span> kJ/mol</div>
+              <input type="range" id="sEa" min="20" max="180" value="75" step="5">
+            </div>
+            <div class="ctrl-group">
+              <div class="ctrl-label">-ΔH Rxn Exotérmica <span id="lDH">50</span> kJ/mol</div>
+              <input type="range" id="sDH" min="10" max="200" value="50" step="10">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section" id="sec-thermal">
+        <div class="section-header" onclick="toggleSection('sec-thermal')">
+          <span class="s-title">▸ Condiciones Térmicas</span>
+          <span class="s-arrow">▾</span>
+        </div>
+        <div class="section-body">
+          <div class="controls">
+            <div class="ctrl-group">
+              <div class="ctrl-label">T° Entrada <span id="lTemp">280</span> °C</div>
+              <input type="range" id="sTemp" min="200" max="500" value="280" step="10">
+            </div>
+            <div class="ctrl-group">
+              <div class="ctrl-label">T° Agua Enfriamiento <span id="lCool">25</span> °C</div>
+              <input type="range" id="sCool" min="10" max="80" value="25" step="5">
+            </div>
+            <div class="ctrl-group">
+              <div class="ctrl-label">Longitud Reactor L <span id="lLen">3.0</span> m</div>
+              <input type="range" id="sLen" min="1" max="8" value="3" step="0.5">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section" id="sec-controls">
+        <div class="section-header" onclick="toggleSection('sec-controls')">
+          <span class="s-title">▸ Modo Vista y Control</span>
+          <span class="s-arrow">▾</span>
+        </div>
+        <div class="section-body">
+          <div class="mode-btns" style="margin-bottom:7px;">
+            <button class="btn active" id="btnA" onclick="setMode('A')">MODO (a)<br><small style="font-size:0.46rem;opacity:0.6">Tubo Simple</small></button>
+            <button class="btn" id="btnB" onclick="setMode('B')">MODO (b)<br><small style="font-size:0.46rem;opacity:0.6">Doble Tubo</small></button>
+          </div>
+          <div class="btn-row">
+            <button class="btn play active" id="btnPlay" onclick="togglePlay()">⏸ PAUSAR</button>
+            <button class="btn" onclick="resetSim()">↺ RESET</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section" id="sec-alarms">
+        <div class="section-header" onclick="toggleSection('sec-alarms')">
+          <span class="s-title">▸ Registro de Alarmas</span>
+          <span class="s-badge" id="alarmBadge">0 activas</span>
+          <span class="s-arrow">▾</span>
+        </div>
+        <div class="section-body" style="padding-bottom:0;">
+          <div class="alarm-log-wrap">
+            <div class="alarm-log-entries" id="alarmLog">
+              <div class="log-entry">
+                <span class="log-time">00:00</span>
+                <span class="log-msg ok">▸ Sistema iniciado — parámetros nominales</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section" id="sec-legend">
+        <div class="section-header" onclick="toggleSection('sec-legend')">
+          <span class="s-title">▸ Leyenda</span>
+          <span class="s-arrow">▾</span>
+        </div>
+        <div class="section-body">
+          <div class="legend">
+            <div class="legend-item"><div class="legend-dot" style="background:var(--reactant)"></div>Gas Reactante (CH₃OH+H₂O)</div>
+            <div class="legend-item"><div class="legend-dot" style="background:var(--product)"></div>Gas Producto (H₂+CO₂)</div>
+            <div class="legend-item"><div class="legend-dot" style="background:var(--water)"></div>Agua de Refrigeración</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#8fa8c8"></div>Pellets de Catalizador</div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- end left-panel -->
+
+    <!-- REACTOR -->
+    <div class="reactor-area">
+      <canvas id="reactor" width="460" height="630"></canvas>
+    </div>
+
+  </div><!-- end top-row -->
+
+  <!-- ══════════ BOTTOM: CHARTS ══════════ -->
+  <div class="charts-section">
+    <div class="charts-header">▸ Gráficas de Perfil Axial</div>
+    <div class="charts-grid">
+
+      <div class="chart-card" id="cc-conv">
+        <div class="chart-header" onclick="toggleChart('cc-conv')">
+          <span class="chart-title-text">Conversión X(z)</span>
+          <span class="chart-badge cb-orange" id="badgeConv">X=—%</span>
+          <span class="chart-toggle-arrow">▾</span>
+        </div>
+        <div class="chart-body" id="cb-conv">
+          <canvas class="chart-canvas" id="cConv"></canvas>
+        </div>
+      </div>
+
+      <div class="chart-card" id="cc-temp">
+        <div class="chart-header" onclick="toggleChart('cc-temp')">
+          <span class="chart-title-text">Temperatura T(z)</span>
+          <span class="chart-badge cb-red" id="badgeTemp">T=—°C</span>
+          <span class="chart-toggle-arrow">▾</span>
+        </div>
+        <div class="chart-body" id="cb-temp">
+          <canvas class="chart-canvas" id="cTemp"></canvas>
+        </div>
+      </div>
+
+      <div class="chart-card" id="cc-conc">
+        <div class="chart-header" onclick="toggleChart('cc-conc')">
+          <span class="chart-title-text">Concentración C(z)</span>
+          <span class="chart-badge cb-purple" id="badgeConc">C=—</span>
+          <span class="chart-toggle-arrow">▾</span>
+        </div>
+        <div class="chart-body" id="cb-conc">
+          <canvas class="chart-canvas" id="cConc"></canvas>
+        </div>
+      </div>
+
+      <div class="chart-card" id="cc-heat">
+        <div class="chart-header" onclick="toggleChart('cc-heat')">
+          <span class="chart-title-text">Calor Liberado Q(z)</span>
+          <span class="chart-badge cb-yellow" id="badgeHeat">Q=—</span>
+          <span class="chart-toggle-arrow">▾</span>
+        </div>
+        <div class="chart-body" id="cb-heat">
+          <canvas class="chart-canvas" id="cHeat"></canvas>
+        </div>
+      </div>
+
+      <div class="chart-card" id="cc-pres">
+        <div class="chart-header" onclick="toggleChart('cc-pres')">
+          <span class="chart-title-text">Caída de Presión P(z)</span>
+          <span class="chart-badge cb-blue" id="badgePres">P=—</span>
+          <span class="chart-toggle-arrow">▾</span>
+        </div>
+        <div class="chart-body" id="cb-pres">
+          <canvas class="chart-canvas" id="cPres"></canvas>
+        </div>
+      </div>
+
+      <div class="chart-card" id="cc-rate">
+        <div class="chart-header" onclick="toggleChart('cc-rate')">
+          <span class="chart-title-text">Tasa de Reacción r(z)</span>
+          <span class="chart-badge cb-green" id="badgeRate">r=—</span>
+          <span class="chart-toggle-arrow">▾</span>
+        </div>
+        <div class="chart-body" id="cb-rate">
+          <canvas class="chart-canvas" id="cRate"></canvas>
+        </div>
+      </div>
+
+    </div>
+  </div><!-- end charts-section -->
+
+</div><!-- end page-wrap -->
+<footer>CHEMICAL ENGINEERING SIMULATOR — PLUG FLOW REACTOR (PFR) — v3.0</footer>
+
+<script>
+// ══════════════════════════════════════════
+// COLLAPSE LOGIC
+// ══════════════════════════════════════════
+function toggleSection(id){
+  const sec=document.getElementById(id);
+  const body=sec.querySelector('.section-body');
+  const collapsed=sec.classList.toggle('collapsed');
+  body.classList.toggle('collapsed',collapsed);
+}
+function toggleChart(id){
+  const card=document.getElementById(id);
+  const body=card.querySelector('.chart-body');
+  const collapsed=card.classList.toggle('collapsed');
+  body.classList.toggle('collapsed',collapsed);
+}
+
+// ══════════════════════════════════════════
+// HiDPI CANVAS SETUP
+// ══════════════════════════════════════════
+const DPR = window.devicePixelRatio || 1;
+
+function setupHiDPICanvas(canvas, cssW, cssH) {
+  canvas.style.width  = cssW + 'px';
+  canvas.style.height = cssH + 'px';
+  canvas.width  = cssW * DPR;
+  canvas.height = cssH * DPR;
+  const cx = canvas.getContext('2d');
+  cx.scale(DPR, DPR);
+  return cx;
+}
+
+// Chart canvases – sized after DOM is ready
+const CHART_CSS_H = 160;
+const chartIds = ['cConv','cTemp','cConc','cHeat','cPres','cRate'];
+let chartContexts = {};
+
+function initChartCanvases() {
+  chartIds.forEach(id => {
+    const c = document.getElementById(id);
+    const cssW = c.parentElement.parentElement.clientWidth - 20; // card padding
+    chartContexts[id] = setupHiDPICanvas(c, cssW > 50 ? cssW : 300, CHART_CSS_H);
+  });
+}
+
+// ══════════════════════════════════════════
+// REACTOR CANVAS
+// ══════════════════════════════════════════
+const reactorEl = document.getElementById('reactor');
+const CSS_W = 460, CSS_H = 630;
+reactorEl.style.width  = CSS_W + 'px';
+reactorEl.style.height = CSS_H + 'px';
+reactorEl.width  = CSS_W * DPR;
+reactorEl.height = CSS_H * DPR;
+const ctx = reactorEl.getContext('2d');
+ctx.scale(DPR, DPR);
+const W = CSS_W, H = CSS_H;
+
+// ══════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════
+let running=true, mode='A', t=0;
+let flowVol=0.5, reactorV=2.0, C0=2.0, pressure=5.0, Ea=75, deltaH=50;
+let inletTemp=280, coolTemp=25, reactorLen=3.0;
+let gasParticles=[], waterParticles=[], catalystPellets=[];
+
+const RX=W/2, RY=H/2, RW=104, RH=210, WALL=13, JACKET=22;
+const bedTop=RY-RH, bedBot=RY+RH, bedL=RX-42, bedR=RX+42;
+
+// ══════════════════════════════════════════
+// KINETICS
+// ══════════════════════════════════════════
+const R_GAS=8.314e-3;
+function getTempK(){ return inletTemp+273.15; }
+function getK(T_K){ return 0.08*Math.exp((Ea/R_GAS)*(1/553.15-1/T_K)); }
+function getTau(){ return reactorV/flowVol; }
+function getConversion(){ return Math.min(0.98,1-Math.exp(-getK(getTempK())*getTau())); }
+const STEPS=60;
+function getConvProfile(){ const k=getK(getTempK()),tau=getTau(); return Array.from({length:STEPS+1},(_,i)=>Math.min(0.98,1-Math.exp(-k*(i/STEPS)*tau))); }
+function getTProfile(){ const rho_cp=4.0,cp=getConvProfile(); return cp.map(X=>inletTemp+(deltaH*C0*X)/rho_cp); }
+function getConcProfile(){ return getConvProfile().map(X=>C0*(1-X)); }
+function getHeatProfile(){ return getConvProfile().map(X=>deltaH*C0*X*flowVol); }
+function getPressureProfile(){ const a=0.04*(flowVol/0.5); return Array.from({length:STEPS+1},(_,i)=>pressure*Math.exp(-a*(i/STEPS))); }
+function getRateProfile(){ const Tp=getTProfile(),Cp=getConcProfile(); return Tp.map((T,i)=>getK(T+273.15)*Cp[i]); }
+
+// ══════════════════════════════════════════
+// CATALYST
+// ══════════════════════════════════════════
+function initCatalyst(){
+  catalystPellets=[];
+  const cols=6,rows=18,cw=(bedR-bedL)/cols,ch=(bedBot-bedTop)/rows;
+  for(let r=0;r<rows;r++) for(let c=0;c<cols;c++)
+    catalystPellets.push({x:bedL+cw*c+cw/2+(Math.random()-.5)*3,y:bedTop+ch*r+ch/2+(Math.random()-.5)*3,r:3+Math.random()*2.2});
+}
+
+// ══════════════════════════════════════════
+// PARTICLES
+// ══════════════════════════════════════════
+function spawnGas(){
+  const sp=0.65+Math.random()*0.5,vS=Math.min(2.4,0.6+flowVol/0.8);
+  if(mode==='A') gasParticles.push({x:RX+(Math.random()-.5)*50,y:bedBot+13,vy:-sp*vS,progress:0,size:2.3+Math.random()*1.8});
+  else gasParticles.push({x:RX+(Math.random()-.5)*15,y:bedBot,vy:-sp*vS,progress:0,size:2.3+Math.random()*1.8,phase:'up',turnTime:0});
+}
+function spawnWater(){
+  const s=Math.random()>.5?1:-1;
+  waterParticles.push({x:RX+s*(RW+JACKET/2-3),y:bedBot,vy:-(0.9+Math.random()*.5),size:1.8+Math.random()*1.3,alpha:.45+Math.random()*.4});
+}
+function lerpColor(c1,c2,t){
+  const p=v=>parseInt(v,16);
+  return `rgb(${Math.round(p(c1.slice(1,3))+(p(c2.slice(1,3))-p(c1.slice(1,3)))*t)},${Math.round(p(c1.slice(3,5))+(p(c2.slice(3,5))-p(c1.slice(3,5)))*t)},${Math.round(p(c1.slice(5,7))+(p(c2.slice(5,7))-p(c1.slice(5,7)))*t)})`;
+}
+function updateParticles(){
+  if(Math.random()<Math.min(0.30,0.07+flowVol*0.13)) spawnGas();
+  if(Math.random()<0.09) spawnWater();
+  const conv=getConversion();
+  gasParticles=gasParticles.filter(p=>{
+    p.y+=p.vy;
+    if(mode==='A'){ const f=1-(p.y-bedTop)/(bedBot-bedTop); p.progress=Math.max(0,Math.min(1,f*conv*1.2)); return p.y>bedTop-50; }
+    else{ if(p.phase==='up'){ const f=1-(p.y-bedTop)/(bedBot-bedTop); p.progress=Math.max(0,Math.min(1,f*conv*1.2)); if(p.y<bedTop-4){p.phase='turn';p.turnTime=0;} return true; } else{ p.turnTime++; if(p.turnTime>15){p.x+=(RX-46-p.x)*0.1;p.y+=Math.abs(p.vy)*.5;return p.y<bedBot+50;} return p.turnTime<30; } }
+  });
+  waterParticles=waterParticles.filter(p=>{p.y+=p.vy;return p.y>bedTop-18;});
+}
+
+// ══════════════════════════════════════════
+// REACTOR DRAW
+// ══════════════════════════════════════════
+function drawRR(x,y,w,h,r){
+  ctx.beginPath(); ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y); ctx.closePath();
+}
+function drawReactorBody(){
+  const rTop=RY-RH-60,rBot=RY+RH+60,bodyW=RW+WALL+JACKET;
+  const g=ctx.createLinearGradient(RX-bodyW,0,RX+bodyW,0);
+  g.addColorStop(0,'rgba(0,150,255,0.05)');g.addColorStop(.5,'rgba(0,150,255,0.1)');g.addColorStop(1,'rgba(0,150,255,0.05)');
+  ctx.fillStyle=g; drawRR(RX-bodyW,rTop,bodyW*2,rBot-rTop,50); ctx.fill();
+  ctx.save(); ctx.strokeStyle='#3a5a88'; ctx.lineWidth=1.5; drawRR(RX-bodyW,rTop,bodyW*2,rBot-rTop,50); ctx.stroke(); ctx.restore();
+  const jT=bedTop-7,jB=bedBot+7;
+  [[RX-RW-WALL-JACKET,JACKET],[RX+RW+WALL,JACKET]].forEach(([x,w])=>{
+    const wg=ctx.createLinearGradient(x,0,x+w,0);
+    wg.addColorStop(0,'rgba(0,150,255,0.04)');wg.addColorStop(.5,'rgba(0,180,255,0.15)');wg.addColorStop(1,'rgba(0,150,255,0.04)');
+    ctx.fillStyle=wg; ctx.fillRect(x,jT,w,jB-jT);
+  });
+  ctx.save(); ctx.strokeStyle='#2a4a70'; ctx.lineWidth=1.1;
+  [RX-RW-WALL,RX-RW,RX+RW,RX+RW+WALL].forEach(x=>{ctx.beginPath();ctx.moveTo(x,jT);ctx.lineTo(x,jB);ctx.stroke();});
+  ctx.restore();
+  if(mode==='B'){ctx.save();ctx.strokeStyle='rgba(100,150,220,0.55)';ctx.lineWidth=1.6;[-14,14].forEach(dx=>{ctx.beginPath();ctx.moveTo(RX+dx,bedTop);ctx.lineTo(RX+dx,bedBot);ctx.stroke();});ctx.restore();}
+  const conv=getConversion(),hi=Math.min(1,(deltaH*C0*conv)/4/200);
+  const hg=ctx.createLinearGradient(0,bedTop,0,bedBot);
+  hg.addColorStop(0,`rgba(255,100,0,${hi*0.12})`);hg.addColorStop(.4,`rgba(255,150,0,${hi*0.22})`);hg.addColorStop(.7,`rgba(255,80,0,${hi*0.15})`);hg.addColorStop(1,`rgba(200,50,0,${hi*0.05})`);
+  ctx.fillStyle=hg; ctx.fillRect(RX-RW,bedTop,RW*2,bedBot-bedTop);
+  const nz=(x,y,d)=>{ctx.beginPath();ctx.fillStyle='#202a3c';ctx.strokeStyle='#3a6090';ctx.lineWidth=1.1;const nw=21,nh=24;d==='b'?ctx.rect(x-nw/2,y,nw,nh):ctx.rect(x-nw/2,y-nh,nw,nh);ctx.fill();ctx.stroke();};
+  nz(RX,rBot,'b');nz(RX,rTop,'t');if(mode==='B')nz(RX-50,rBot,'b');
+  const wp=(x,y,s)=>{ctx.fillStyle='rgba(0,150,255,0.12)';ctx.strokeStyle='rgba(0,150,255,0.5)';ctx.lineWidth=0.9;const pw=23,ph=9,sx=s==='l'?x-pw:x;ctx.fillRect(sx,y-ph/2,pw,ph);ctx.strokeRect(sx,y-ph/2,pw,ph);};
+  wp(RX-bodyW,bedTop+25,'l');wp(RX-bodyW,bedBot-25,'l');wp(RX+bodyW,bedTop+25,'r');wp(RX+bodyW,bedBot-25,'r');
+}
+function drawCatalyst(){
+  catalystPellets.forEach(p=>{
+    const g=ctx.createRadialGradient(p.x-p.r*.3,p.y-p.r*.3,0,p.x,p.y,p.r);
+    g.addColorStop(0,'rgba(170,198,228,0.9)');g.addColorStop(.6,'rgba(90,122,162,0.7)');g.addColorStop(1,'rgba(32,52,92,0.5)');
+    ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fillStyle=g;ctx.fill();
+  });
+}
+function drawParticles(){
+  waterParticles.forEach(p=>{ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fillStyle=`rgba(0,180,255,${p.alpha*0.62})`;ctx.fill();});
+  gasParticles.forEach(p=>{ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fillStyle=lerpColor('#ff6b35','#00e5a0',p.progress);ctx.shadowColor=lerpColor('#ff3300','#00ff88',p.progress);ctx.shadowBlur=5;ctx.fill();ctx.shadowBlur=0;});
+}
+function drawFlowArrows(){
+  ctx.save();ctx.strokeStyle='rgba(0,229,160,0.18)';ctx.lineWidth=1.2;ctx.setLineDash([5,8]);
+  ctx.beginPath();ctx.moveTo(RX,bedBot);ctx.lineTo(RX,bedTop);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle='rgba(0,229,160,0.28)';ctx.beginPath();ctx.moveTo(RX,bedTop-6);ctx.lineTo(RX-5,bedTop+4);ctx.lineTo(RX+5,bedTop+4);ctx.closePath();ctx.fill();
+  ctx.restore();
+}
+function drawLabels(){
+  const rTop=RY-RH-60,rBot=RY+RH+60,bodyW=RW+WALL+JACKET;
+  ctx.save();ctx.font='9px Share Tech Mono';ctx.textAlign='center';
+  ctx.fillStyle='#ff6b35';ctx.fillText('INLET GAS',RX,rBot+46);
+  ctx.fillStyle='rgba(255,107,53,0.5)';ctx.fillText(`F₀=${flowVol.toFixed(1)} m³/s  C₀=${C0} mol/L`,RX,rBot+57);
+  ctx.fillStyle='#00e5a0';ctx.fillText('OUTLET GAS',RX,rTop-34);
+  ctx.fillStyle='rgba(0,229,160,0.5)';ctx.fillText(`P=${pressure.toFixed(1)} bar`,RX,rTop-24);
+  ctx.fillStyle='rgba(150,190,250,0.6)';ctx.font='8px Share Tech Mono';ctx.textAlign='right';
+  ctx.fillText('CATALYST BED',RX+bodyW+54,RY-14);ctx.fillText(`Ea=${Ea} kJ/mol`,RX+bodyW+54,RY-4);
+  ctx.fillText('-ΔH='+deltaH+' kJ/mol',RX+bodyW+54,RY+7);
+  ctx.fillText('COOLING WATER',RX+bodyW+54,RY+34);ctx.fillText(`Tc=${coolTemp}°C`,RX+bodyW+54,RY+44);
+  ctx.strokeStyle='rgba(100,150,220,0.3)';ctx.lineWidth=1;ctx.setLineDash([4,5]);
+  ctx.beginPath();ctx.moveTo(RX+bodyW+6,rTop);ctx.lineTo(RX+bodyW+6,rBot);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle='rgba(150,180,255,0.5)';ctx.textAlign='left';
+  ctx.save();ctx.translate(RX+bodyW+18,RY);ctx.rotate(-Math.PI/2);ctx.fillText(`L=${reactorLen.toFixed(1)}m  V=${reactorV.toFixed(1)}m³`,0,0);ctx.restore();
+  ctx.restore();
+}
+
+// ══════════════════════════════════════════
+// CHARTS — HiDPI aware
+// ══════════════════════════════════════════
+function drawChart(canvasId, dataArr, opts){
+  const canvasEl = document.getElementById(canvasId);
+  if(!canvasEl) return;
+
+  // Get CSS size from parent
+  const cssW = canvasEl.parentElement.clientWidth - 20;
+  const cssH = CHART_CSS_H;
+
+  // Resize canvas to match current size × DPR
+  if(canvasEl.width !== cssW*DPR || canvasEl.height !== cssH*DPR){
+    canvasEl.style.width  = cssW+'px';
+    canvasEl.style.height = cssH+'px';
+    canvasEl.width  = Math.round(cssW*DPR);
+    canvasEl.height = Math.round(cssH*DPR);
+  }
+
+  const cx = canvasEl.getContext('2d');
+  // Reset transform & apply DPR scale
+  cx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+  const pw=cssW, ph=cssH;
+  // Generous padding so labels are never clipped
+  const P={l:46, r:14, t:14, b:28};
+  const plotW=pw-P.l-P.r, plotH=ph-P.t-P.b;
+
+  cx.clearRect(0,0,pw,ph);
+  cx.fillStyle='rgba(7,13,26,0.55)'; cx.fillRect(0,0,pw,ph);
+
+  // Grid lines
+  cx.strokeStyle='rgba(30,60,100,0.4)'; cx.lineWidth=0.5;
+  const gridY=4, gridX=5;
+  for(let i=0;i<=gridX;i++){ const x=P.l+plotW*i/gridX; cx.beginPath();cx.moveTo(x,P.t);cx.lineTo(x,P.t+plotH);cx.stroke(); }
+  for(let i=0;i<=gridY;i++){ const y=P.t+plotH*i/gridY; cx.beginPath();cx.moveTo(P.l,y);cx.lineTo(P.l+plotW,y);cx.stroke(); }
+
+  // Axes
+  cx.strokeStyle='rgba(80,120,180,0.7)'; cx.lineWidth=1.2;
+  cx.beginPath();cx.moveTo(P.l,P.t);cx.lineTo(P.l,P.t+plotH);cx.lineTo(P.l+plotW,P.t+plotH);cx.stroke();
+
+  const minV=opts.min!==undefined?opts.min:Math.min(...dataArr);
+  const maxV=opts.max!==undefined?opts.max:(Math.max(...dataArr)*1.06||1);
+  const range=maxV-minV||1;
+
+  const xAt=i=>P.l+plotW*i/(dataArr.length-1);
+  const yAt=v=>P.t+plotH-(v-minV)/range*plotH;
+
+  // Fill
+  cx.beginPath();
+  dataArr.forEach((v,i)=>i===0?cx.moveTo(xAt(i),yAt(v)):cx.lineTo(xAt(i),yAt(v)));
+  cx.lineTo(xAt(dataArr.length-1),P.t+plotH);cx.lineTo(P.l,P.t+plotH);cx.closePath();
+  const fg=cx.createLinearGradient(0,P.t,0,P.t+plotH);
+  fg.addColorStop(0,opts.color+'30');fg.addColorStop(1,opts.color+'04');
+  cx.fillStyle=fg; cx.fill();
+
+  // Line
+  cx.beginPath();
+  dataArr.forEach((v,i)=>i===0?cx.moveTo(xAt(i),yAt(v)):cx.lineTo(xAt(i),yAt(v)));
+  if(opts.gradient){
+    const lg=cx.createLinearGradient(P.l,0,P.l+plotW,0);
+    opts.gradient.forEach(([s,c])=>lg.addColorStop(s,c));
+    cx.strokeStyle=lg;
+  } else cx.strokeStyle=opts.color;
+  cx.lineWidth=2; cx.stroke();
+
+  // Threshold
+  if(opts.threshold!==undefined){
+    const ty=yAt(opts.threshold);
+    if(ty>P.t&&ty<P.t+plotH){
+      cx.save();cx.strokeStyle='rgba(255,60,0,0.6)';cx.lineWidth=1;cx.setLineDash([5,4]);
+      cx.beginPath();cx.moveTo(P.l,ty);cx.lineTo(P.l+plotW,ty);cx.stroke();cx.setLineDash([]);cx.restore();
+    }
+  }
+
+  // ── LABELS — crisp, readable font ──
+  cx.fillStyle='rgba(160,195,235,0.85)';
+  cx.font=`bold ${11}px "Share Tech Mono", monospace`;
+  cx.textBaseline='middle';
+
+  // Y-axis label (rotated, left side)
+  cx.save();
+  cx.translate(10, P.t+plotH/2);
+  cx.rotate(-Math.PI/2);
+  cx.textAlign='center';
+  cx.fillText(opts.yLabel||'', 0, 0);
+  cx.restore();
+
+  // Y tick values
+  cx.textAlign='right';
+  cx.font=`${10}px "Share Tech Mono", monospace`;
+  cx.fillStyle='rgba(150,185,225,0.75)';
+  for(let i=0;i<=gridY;i++){
+    const v=minV+(maxV-minV)*(gridY-i)/gridY;
+    const y=P.t+plotH*i/gridY;
+    cx.fillText(v.toFixed(opts.d||1), P.l-5, y);
+  }
+
+  // X tick values
+  cx.textAlign='center';
+  cx.textBaseline='top';
+  cx.font=`${10}px "Share Tech Mono", monospace`;
+  cx.fillStyle='rgba(150,185,225,0.75)';
+  for(let i=0;i<=gridX;i++){
+    const z=(i/gridX*reactorLen);
+    cx.fillText(z.toFixed(1)+'m', P.l+plotW*i/gridX, P.t+plotH+4);
+  }
+
+  // X axis title
+  cx.textAlign='center';
+  cx.font=`${9}px "Share Tech Mono", monospace`;
+  cx.fillStyle='rgba(100,140,180,0.6)';
+  cx.fillText('Posición axial z', P.l+plotW/2, ph-5);
+}
+
+function updateCharts(){
+  const conv=getConversion(),Tp=getTProfile(),Cp=getConcProfile(),Hp=getHeatProfile(),Pp=getPressureProfile(),Rp=getRateProfile();
+  document.getElementById('badgeConv').textContent=`X=${(conv*100).toFixed(1)}%`;
+  document.getElementById('badgeTemp').textContent=`${Math.max(...Tp).toFixed(0)}°C`;
+  document.getElementById('badgeConc').textContent=`${Cp[STEPS].toFixed(2)} mol/L`;
+  document.getElementById('badgeHeat').textContent=`${Hp[STEPS].toFixed(1)} kW`;
+  document.getElementById('badgePres').textContent=`${Pp[STEPS].toFixed(2)} bar`;
+  document.getElementById('badgeRate').textContent=`r₀=${Rp[0].toFixed(3)}`;
+
+  drawChart('cConv',getConvProfile().map(v=>v*100),{color:'#ff6b35',min:0,max:100,yLabel:'X (%)',gradient:[[0,'#ff8855'],[1,'#00e5a0']],d:0});
+  drawChart('cTemp',Tp,{color:'#ff5022',min:coolTemp,max:Math.max(...Tp)*1.06,yLabel:'T (°C)',threshold:450,d:0});
+  drawChart('cConc',Cp,{color:'#b060ff',min:0,max:C0*1.06,yLabel:'C (mol/L)',gradient:[[0,'#b060ff'],[1,'#5030cc']],d:2});
+  drawChart('cHeat',Hp,{color:'#ffd060',min:0,yLabel:'Q (kW)',gradient:[[0,'#ffd060'],[1,'#ff6000']],d:1});
+  drawChart('cPres',Pp,{color:'#00d4ff',min:0,max:pressure*1.06,yLabel:'P (bar)',gradient:[[0,'#00d4ff'],[1,'#0055aa']],d:2});
+  drawChart('cRate',Rp,{color:'#00e5a0',min:0,yLabel:'r (mol/Ls)',gradient:[[0,'#00e5a0'],[1,'#007744']],d:3});
+}
+
+// ══════════════════════════════════════════
+// METRICS
+// ══════════════════════════════════════════
+function updateMetrics(){
+  const conv=getConversion(),Tp=getTProfile(),peakT=Math.max(...Tp),Hp=getHeatProfile();
+  document.getElementById('mConv').innerHTML=(conv*100).toFixed(1)+'<span class="metric-unit">%</span>';
+  document.getElementById('mTemp').innerHTML=peakT.toFixed(0)+'<span class="metric-unit">°C</span>';
+  document.getElementById('mCool').innerHTML=coolTemp+'<span class="metric-unit">°C</span>';
+  document.getElementById('mFlow').innerHTML=(flowVol*conv).toFixed(3)+'<span class="metric-unit">m³/s</span>';
+  document.getElementById('mCout').innerHTML=(C0*(1-conv)).toFixed(2)+'<span class="metric-unit">mol/L</span>';
+  document.getElementById('mHeat').innerHTML=Hp[STEPS].toFixed(1)+'<span class="metric-unit">kW</span>';
+}
+
+// ══════════════════════════════════════════
+// DRAW
+// ══════════════════════════════════════════
+function draw(){
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.clearRect(0,0,W,H);
+  const bg=ctx.createRadialGradient(RX,RY,40,RX,RY,300);bg.addColorStop(0,'rgba(0,30,80,0.28)');bg.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+  drawReactorBody();drawCatalyst();drawFlowArrows();drawParticles();drawLabels();
+  updateMetrics();updateCharts();
+}
+
+// ══════════════════════════════════════════
+// ALARM SYSTEM
+// ══════════════════════════════════════════
+const ALARMS={
+  HIGH_TEMP:   {id:'HIGH_TEMP',   level:'warning', title:'⚠ TEMPERATURA ALTA',            desc:'T° reactor >380°C. Riesgo sinterización catalizador.', metricId:'mTemp'},
+  CRIT_TEMP:   {id:'CRIT_TEMP',   level:'critical',title:'🔴 TEMPERATURA CRÍTICA',         desc:'T° >450°C. ¡RUNAWAY TÉRMICO INMINENTE!',               metricId:'mTemp'},
+  RUNAWAY:     {id:'RUNAWAY',     level:'critical',title:'🔴 RUNAWAY TÉRMICO',              desc:'T° >500°C. ¡APAGADO DE EMERGENCIA RECOMENDADO!',       metricId:'mTemp'},
+  LOW_COOLANT: {id:'LOW_COOLANT', level:'warning', title:'⚠ REFRIGERACIÓN INSUFICIENTE',   desc:'ΔT reactor−agua >350°C. Pérdida de control térmico.',  metricId:'mCool'},
+  HIGH_FLOW:   {id:'HIGH_FLOW',   level:'danger',  title:'⚡ CAUDAL VOLUMÉTRICO EXCESIVO',  desc:'F₀>1.8 m³/s. τ insuficiente, conversión cae.',         metricId:'mFlow'},
+  LOW_CONV:    {id:'LOW_CONV',    level:'warning', title:'⚠ BAJA CONVERSIÓN',              desc:'X<20%. Verificar Ea, T° o volumen del reactor.',        metricId:'mConv'},
+  COOL_HOT:    {id:'COOL_HOT',    level:'danger',  title:'⚡ AGUA ENFRIAMIENTO CALIENTE',   desc:'T°agua>60°C. Refrigeración inefectiva.',               metricId:'mCool'},
+  HIGH_PRES:   {id:'HIGH_PRES',   level:'warning', title:'⚠ PRESIÓN ELEVADA',              desc:'P>15 bar. Riesgo mecánico en el reactor.',             metricId:'mCout'},
+  HIGH_HEAT:   {id:'HIGH_HEAT',   level:'danger',  title:'⚡ CARGA TÉRMICA EXCESIVA',       desc:'-ΔH×C₀>300 kJ/L. Control térmico crítico.',           metricId:'mHeat'},
+  HIGH_EA:     {id:'HIGH_EA',     level:'warning', title:'⚠ Ea ALTA — CINÉTICA LENTA',     desc:'Ea>140 kJ/mol. Conversión puede ser insuficiente.',    metricId:'mConv'},
+};
+let activeAlarms=new Set(),alarmBanners={},logTime=0;
+
+function getAlarmLevel(){
+  if(activeAlarms.has('RUNAWAY')||activeAlarms.has('CRIT_TEMP')) return 'critical';
+  if(activeAlarms.has('HIGH_FLOW')||activeAlarms.has('COOL_HOT')||activeAlarms.has('HIGH_HEAT')) return 'danger';
+  if(activeAlarms.size>0) return 'warning';
+  return 'nominal';
+}
+function addLog(msg,type){
+  const log=document.getElementById('alarmLog');
+  const s=Math.floor(logTime),mm=String(Math.floor(s/60)).padStart(2,'0'),ss=String(s%60).padStart(2,'0');
+  const e=document.createElement('div');e.className='log-entry';
+  e.innerHTML=`<span class="log-time">${mm}:${ss}</span><span class="log-msg ${type}">${msg}</span>`;
+  log.insertBefore(e,log.firstChild);
+  while(log.children.length>30) log.removeChild(log.lastChild);
+  if(type!=='ok'){ const sec=document.getElementById('sec-alarms'); if(sec.classList.contains('collapsed')) toggleSection('sec-alarms'); }
+  updateAlarmBadge();
+}
+function updateAlarmBadge(){
+  const badge=document.getElementById('alarmBadge'),n=activeAlarms.size;
+  badge.textContent=n===0?'0 activas':`${n} activa${n>1?'s':''}`;
+  const lv=getAlarmLevel();
+  badge.className='s-badge'+(lv==='critical'?' alarm-critical':lv==='danger'?' alarm-danger':lv==='warning'?' alarm-active':'');
+}
+function showBanner(alarm){
+  if(alarmBanners[alarm.id]) return;
+  const div=document.createElement('div');div.className=`alarm-banner ${alarm.level}`;div.id=`banner-${alarm.id}`;
+  div.innerHTML=`<div class="alarm-icon">${alarm.level==='critical'?'🚨':alarm.level==='danger'?'⚡':'⚠️'}</div><div class="alarm-text"><div class="alarm-title">${alarm.title}</div><div class="alarm-desc">${alarm.desc}</div></div>`;
+  document.getElementById('alarmOverlay').appendChild(div);alarmBanners[alarm.id]=div;
+}
+function removeBanner(id){ const d=document.getElementById(`banner-${id}`);if(d)d.remove();delete alarmBanners[id]; }
+function setMetricAlarm(mid,lv){ const el=document.getElementById(mid)?.closest('.metric');if(!el)return;el.classList.remove('alarm-warn','alarm-danger','alarm-critical');if(lv==='warning')el.classList.add('alarm-warn');else if(lv==='danger')el.classList.add('alarm-danger');else if(lv==='critical')el.classList.add('alarm-critical'); }
+function clearMetricAlarm(mid){ document.getElementById(mid)?.closest('.metric')?.classList.remove('alarm-warn','alarm-danger','alarm-critical'); }
+
+function checkAlarms(){
+  const conv=getConversion(),Tp=getTProfile(),peakT=Math.max(...Tp),heatLoad=deltaH*C0;
+  logTime+=0.016;
+  const cond={ HIGH_TEMP:peakT>=380&&peakT<450, CRIT_TEMP:peakT>=450&&peakT<500, RUNAWAY:peakT>=500, LOW_COOLANT:(peakT-coolTemp)>350&&peakT<500, HIGH_FLOW:flowVol>1.8, LOW_CONV:conv*100<20, COOL_HOT:coolTemp>60, HIGH_PRES:pressure>15, HIGH_HEAT:heatLoad>300, HIGH_EA:Ea>140 };
+  if(cond.RUNAWAY){cond.CRIT_TEMP=false;cond.HIGH_TEMP=false;}
+  if(cond.CRIT_TEMP) cond.HIGH_TEMP=false;
+  Object.entries(cond).forEach(([id,active])=>{
+    const alarm=ALARMS[id],was=activeAlarms.has(id);
+    if(active&&!was){activeAlarms.add(id);showBanner(alarm);setMetricAlarm(alarm.metricId,alarm.level);addLog(alarm.title,alarm.level==='critical'?'c':alarm.level==='danger'?'d':'w');}
+    else if(!active&&was){activeAlarms.delete(id);removeBanner(id);clearMetricAlarm(alarm.metricId);addLog(`✓ ${alarm.title.replace(/[⚠⚡🔴]/g,'').trim()}`,'ok');}
+  });
+  updateAlarmBadge();
+  const lv=getAlarmLevel();
+  const dot=document.getElementById('statusDot'),txt=document.getElementById('statusText'),flash=document.getElementById('criticalFlash');
+  dot.className='status-dot'+(lv!=='nominal'?' '+(lv==='critical'?'critical':lv==='danger'?'danger':'warn'):'');
+  if(lv==='critical'){txt.textContent='⚠ CONDICIÓN CRÍTICA';txt.style.color='#ff0030';flash.classList.add('flashing');}
+  else if(lv==='danger'){txt.textContent='⚡ CONDICIÓN DE PELIGRO';txt.style.color='#ff4020';flash.classList.remove('flashing');}
+  else if(lv==='warning'){txt.textContent='⚠ ADVERTENCIA ACTIVA';txt.style.color='#ffb400';flash.classList.remove('flashing');}
+  else{txt.textContent='✓ SISTEMA NOMINAL';txt.style.color='var(--product)';flash.classList.remove('flashing');}
+}
+
+// ══════════════════════════════════════════
+// LOOP
+// ══════════════════════════════════════════
+let lastTime=0;
+function loop(time){
+  if(!running){requestAnimationFrame(loop);return;}
+  const dt=time-lastTime;
+  if(dt>16){t+=0.016;updateParticles();draw();checkAlarms();lastTime=time;}
+  requestAnimationFrame(loop);
+}
+
+// ══════════════════════════════════════════
+// CONTROLS
+// ══════════════════════════════════════════
+const bind=(id,setter,lid,dec)=>document.getElementById(id).addEventListener('input',e=>{setter(parseFloat(e.target.value));document.getElementById(lid).textContent=parseFloat(e.target.value).toFixed(dec);});
+bind('sFlow',v=>flowVol=v,'lFlow',1);
+bind('sVol', v=>reactorV=v,'lVol',1);
+bind('sC0',  v=>C0=v,'lC0',1);
+bind('sPres',v=>pressure=v,'lPres',1);
+bind('sEa',  v=>Ea=v,'lEa',0);
+bind('sDH',  v=>deltaH=v,'lDH',0);
+bind('sTemp',v=>inletTemp=v,'lTemp',0);
+bind('sCool',v=>coolTemp=v,'lCool',0);
+bind('sLen', v=>reactorLen=v,'lLen',1);
+
+function setMode(m){mode=m;gasParticles=[];document.getElementById('btnA').classList.toggle('active',m==='A');document.getElementById('btnB').classList.toggle('active',m==='B');}
+function togglePlay(){running=!running;const btn=document.getElementById('btnPlay');btn.textContent=running?'⏸ PAUSAR':'▶ REANUDAR';btn.classList.toggle('active',running);}
+function resetSim(){gasParticles=[];waterParticles=[];t=0;}
+
+// ══════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════
+initCatalyst();
+// Small delay so layout is painted before reading widths
+setTimeout(()=>{ initChartCanvases(); requestAnimationFrame(loop); }, 80);
+
+// Re-init on resize
+window.addEventListener('resize', ()=>{ initChartCanvases(); });
+</script>
+</body>
+</html>
